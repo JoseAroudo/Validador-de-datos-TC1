@@ -11,12 +11,14 @@ Alfanum150 = re.compile(r'^[A-Za-z0-9\-\s]{1,150}$')  # Dirección (permite guio
 # === NUMÉRICOS ENTEROS ===
 num1_5 = re.compile(r'^\d{1,5}$')  # ID CX (hasta 5 dígitos)
 num8_exacto = re.compile(r'^\d{8}$')  # Cod DANE (8 dígitos exactos)
-num1_3 = re.compile(r'^\d{1,3}$')  # Ubicación, Cond Especiales, etc.
 num_positivo_4dig = re.compile(r'^\d{1,4}$')  # Altitud (positivo, hasta 4 dígitos)
 
 # === DECIMALES ===
 # Longitud: formato -XX.XXXX a -XX.XXXXXXXXXXXXXXX (2 enteros, 4-15 decimales, negativo)
 decimal_longitud = re.compile(r'^-\d{2}\.\d{4,15}$')
+
+# Longitud con menos de 4 decimales: decimal negativo válido pero impreciso (solo advertencia)
+decimal_longitud_corto = re.compile(r'^-\d{2}\.\d{1,3}$')
 
 # Latitud: formato -XX.XXXX a XX.XXXXXXXXXXXXXXX (2 enteros, 4-15 decimales, positivo o negativo)
 decimal_latitud = re.compile(r'^-?\d{1,2}\.\d{4,15}$')

@@ -2,9 +2,9 @@ from typing import Pattern
 from datetime import datetime
 from .regex_patterns import (
     Alfanum10, Alfanum11, Alfanum12, Alfanum150,
-    num1_5, num8_exacto, num1_3, num_positivo_4dig,
-    decimal_longitud, decimal_latitud, decimal_capacidad_auto,
-    decimal_capacidad_respaldo, fecha_ddmmaaaa
+    num1_5, num8_exacto, num_positivo_4dig,
+    decimal_longitud, decimal_longitud_corto, decimal_latitud,
+    decimal_capacidad_auto, decimal_capacidad_respaldo, fecha_ddmmaaaa
 )
 
 # === CONJUNTOS DE VALORES VÁLIDOS ===
@@ -48,29 +48,17 @@ def _validar_con_regex(
         return False, mensaje_invalido
     return True, ""
 
-def _validar_longitud(
+def _validar_latitud(
     valor: str,
     patron: Pattern[str],
     mensaje_vacio: str,
-) -> tuple[bool, str]:
+) -> tuple[bool | int, str]:
     """Valida un campo contra un patrón regex."""
     ok, msg = _validar_requerido(valor, mensaje_vacio)
     if not ok:
         return 1, ""
     if not patron.match(valor):
-        return 0, f"Error: Longitud inválido: '{valor}' (debe ser decimal negativo, formato -XX.XXXX a -XX.XXXXXXXXXXXXXXX, 4-15 decimales)"
-    return True, ""
-def _validar_latitud(
-    valor: str, 
-    patron: Pattern[str],
-    mensaje_vacio: str,
-) -> tuple[bool, str]:
-    """Valida un campo contra un patrón regex."""
-    ok, msg = _validar_requerido(valor, mensaje_vacio)
-    if not ok:
-        return 1, ""
-    if not patron.match(valor):
-        return 0, f"Error: Latitud inválido: '{valor}' (debe ser decimal negativo, formato -XX.XXXX a -XX.XXXXXXXXXXXXXXX, 4-15 decimales)"
+        return 0, f"Latitud inválido: '{valor}' (debe ser decimal negativo, formato -XX.XXXX a -XX.XXXXXXXXXXXXXXX, 4-15 decimales)"
     return True, ""
 
 
@@ -249,7 +237,7 @@ def validar_cod_frontera(valor: str) -> tuple[bool | int, str]:
         return False, f"Cod frontera no puede contener espacios: '{valor}'"
     
     if not valor.startswith("Frt"):
-        return 2, f"Advertencia: Cod frontera '{valor}' no inicia con 'Frt'"
+        return 2, f"Cod frontera '{valor}' no inicia con 'Frt'"
     
     return True, ""
 
@@ -359,28 +347,23 @@ def validar_altitud(valor: str) -> tuple[bool, str]:
 
 
 # Campo 22: Longitud
-def validar_longitud(valor: str) -> tuple[bool, str]:
+def validar_longitud(valor: str) -> tuple[bool | int, str]:
     if valor.strip() == "":
         return 2, "El valor de Longitud está vacío, se recomienda completar"
 
-    ok, msg = _validar_longitud(
-        valor,
-        decimal_longitud,
-        "",
-    )
-    if ok == 2:
-        return 2, f"valor menor a 4 decimales"
-    if not ok:
-        return ok, msg
-    
+    if not decimal_longitud.match(valor):
+        # Decimal negativo válido pero con menos de 4 decimales: solo advertencia.
+        if decimal_longitud_corto.match(valor):
+            return 2, f"Longitud '{valor}' tiene menos de 4 decimales, se recomienda mayor precisión"
+        return False, f"Longitud inválido: '{valor}' (debe ser decimal negativo, formato -XX.XXXX a -XX.XXXXXXXXXXXXXXX, 4-15 decimales)"
+
     try:
         longitud = float(valor)
         if longitud < -79.0425 or longitud > -66.84833333:
             return False, f"Longitud fuera de rango: '{valor}' (debe estar entre -79.0425 y -66.84833333)"
-
     except ValueError:
         return False, f"Longitud inválido: '{valor}' (no es un número decimal válido)"
-    
+
     return True, ""
 
 
@@ -495,11 +478,12 @@ def validar_capacidad_respaldo(valor: str) -> tuple[bool, str]:
 
 # === REGLAS CONDICIONALES (CROSS-FIELD) ===
 
-def validar_consistencias_multicampo(campos: list[str]) -> list[str]:
+def validar_consistencias_multicampo(campos: list[str]) -> list[tuple[str, str]]:
     """
     Valida las reglas condicionales entre múltiples campos.
-    Retorna una lista de advertencias.
-    
+    Retorna una lista de tuplas (campo_destino, advertencia), donde campo_destino
+    es el nombre del campo al que se imputa la advertencia en el resumen por campo.
+
     Campos indexados (0-based):
     [0] NIU
     [1] Cod Conexión
@@ -533,78 +517,86 @@ def validar_consistencias_multicampo(campos: list[str]) -> list[str]:
     [29] Contrato de respaldo
     [30] Capacidad respaldo
     """
-    advertencias = []
-    
+    advertencias: list[tuple[str, str]] = []
+
     # Regla 1: Campo 5 (Nivel Tension Primario) depende de Campo 4 (Nivel Tension)
     nivel_sec = campos[3]
     nivel_prim = campos[4]
-    
+
     if nivel_sec == "1":
         if nivel_prim not in ("2", "3"):
-            advertencias.append(
-                f"Advertencia: Si Nivel de Tension (secundaria) = 1, entonces Nivel de Tension Primario debe ser 2 o 3, pero es '{nivel_prim}'"
-            )
+            advertencias.append((
+                "Nivel de Tension Primario",
+                f"Si Nivel de Tension (secundaria) = 1, entonces Nivel de Tension Primario debe ser 2 o 3, pero es '{nivel_prim}'",
+            ))
     else:
         if nivel_prim != "0":
-            advertencias.append(
-                f"Advertencia: Si Nivel de Tension (secundaria) = {nivel_sec}, entonces Nivel de Tension Primario debe ser 0, pero es '{nivel_prim}'"
-            )
-    
+            advertencias.append((
+                "Nivel de Tension Primario",
+                f"Si Nivel de Tension (secundaria) = {nivel_sec}, entonces Nivel de Tension Primario debe ser 0, pero es '{nivel_prim}'",
+            ))
+
     # Regla 2: Campo 12 (Cod Circuito) condicional a Campo 3 (Tipo de C)
     tipo_c = campos[2]
     cod_circuito = campos[11].strip()
     cod_conexion = campos[1]
-    
+
     if tipo_c == "1":
         if cod_circuito == "":
-            advertencias.append(
-                f"Advertencia: Si Tipo de conexión = 1, entonces Cod Circuito no puede ser nulo"
-            )
+            advertencias.append((
+                "Cod Circuito",
+                "Si Tipo de conexión = 1, entonces Cod Circuito no puede ser nulo",
+            ))
         elif cod_circuito != cod_conexion:
-            advertencias.append(
-                f"Advertencia: Si Tipo de conexión = 1, entonces Cod Circuito debe ser igual a Cod Conexión ('{cod_conexion}'), pero es '{cod_circuito}'"
-            )
-    
+            advertencias.append((
+                "Cod Circuito",
+                f"Si Tipo de conexión = 1, entonces Cod Circuito debe ser igual a Cod Conexión ('{cod_conexion}'), pero es '{cod_circuito}'",
+            ))
+
     # Regla 3: Campo 13 (Cod Trafo) condicional a Campo 3 (Tipo de C)
     cod_trafo = campos[12].strip()
-    
+
     if tipo_c == "2":
         if cod_trafo == "":
-            advertencias.append(
-                f"Advertencia: Si Tipo de conexión = 2, entonces Cod Trafo no puede ser nulo"
-            )
+            advertencias.append((
+                "Cod Trafo",
+                "Si Tipo de conexión = 2, entonces Cod Trafo no puede ser nulo",
+            ))
         elif cod_trafo != cod_conexion:
-            advertencias.append(
-                f"Advertencia: Si Tipo de conexión = 2, entonces Cod Trafo debe ser igual a Cod Conexión ('{cod_conexion}'), pero es '{cod_trafo}'"
-            )
-    
+            advertencias.append((
+                "Cod Trafo",
+                f"Si Tipo de conexión = 2, entonces Cod Trafo debe ser igual a Cod Conexión ('{cod_conexion}'), pero es '{cod_trafo}'",
+            ))
+
     # Regla 4: Campos 25-31 (Exporta Energia, Capacidad Auto, Tipo Generacion, etc.) deben ser nulos si Autogenerador = 3
     autogenerador = campos[23]
-    
+
     if autogenerador == "3":
-        campos_autogen = {
-            24: ("Exporta Energia", campos[24]),
-            25: ("Capacidad Autogenerador", campos[25]),
-            26: ("Tipo de generacion", campos[26]),
-            27: ("Cod frontera Autogeneración", campos[27]),
-            28: ("Fecha entrada en operación", campos[28]),
-            29: ("Contrato de respaldo", campos[29]),
-            30: ("Capacidad respaldo", campos[30]),
-        }
-        for idx, (nombre_campo, valor) in campos_autogen.items():
+        campos_autogen = [
+            ("Exporta Energia", campos[24]),
+            ("Capacidad Autogenerador", campos[25]),
+            ("Tipo de generacion", campos[26]),
+            ("Cod frontera Aut", campos[27]),
+            ("Fecha entrada en operación", campos[28]),
+            ("Contrato de respaldo", campos[29]),
+            ("Capacidad respaldo", campos[30]),
+        ]
+        for nombre_campo, valor in campos_autogen:
             if valor.strip() != "":
-                advertencias.append(
-                    f"Advertencia: Si Autogenerador = 3, entonces {nombre_campo} debe ser nulo, pero tiene valor '{valor}'"
-                )
-    
+                advertencias.append((
+                    nombre_campo,
+                    f"Si Autogenerador = 3, entonces {nombre_campo} debe ser nulo, pero tiene valor '{valor}'",
+                ))
+
     # Regla 5: Campo 31 (Capacidad respaldo) debe ser nulo si Campo 30 (Contrato respaldo) = 2
     contrato_respaldo = campos[29].strip()
     capacidad_respaldo = campos[30].strip()
-    
+
     if contrato_respaldo == "2":
         if capacidad_respaldo != "":
-            advertencias.append(
-                f"Advertencia: Si Contrato de respaldo = 2, entonces Capacidad respaldo debe ser nulo, pero tiene valor '{capacidad_respaldo}'"
-            )
-    
+            advertencias.append((
+                "Capacidad respaldo",
+                f"Si Contrato de respaldo = 2, entonces Capacidad respaldo debe ser nulo, pero tiene valor '{capacidad_respaldo}'",
+            ))
+
     return advertencias

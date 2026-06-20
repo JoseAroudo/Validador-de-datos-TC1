@@ -51,7 +51,6 @@ def validar_registro(campos: list[str], num_fila: int) -> tuple[str, int, int, d
         "Fecha entrada en operación": {"errores": 0, "advertencias": 0},
         "Contrato de respaldo": {"errores": 0, "advertencias": 0},
         "Capacidad respaldo": {"errores": 0, "advertencias": 0},
-        "Consistencias Multicampo": {"errores": 0, "advertencias": 0},
     }
 
     if len(campos) != 31:
@@ -108,10 +107,11 @@ def validar_registro(campos: list[str], num_fila: int) -> tuple[str, int, int, d
             errores.append(msg)
             resumen_campos[nombre_campo]["errores"] += 1
     
-    # Validar consistencias entre campos
+    # Validar consistencias entre campos: cada advertencia se imputa a su campo destino
     advertencias_multicampo = validar_consistencias_multicampo(campos)
-    advertencias.extend(advertencias_multicampo)
-    resumen_campos["Consistencias Multicampo"]["advertencias"] += len(advertencias_multicampo)
+    for campo_destino, mensaje in advertencias_multicampo:
+        advertencias.append(mensaje)
+        resumen_campos[campo_destino]["advertencias"] += 1
     
     # Reportar resultado
     estado = "ok"
